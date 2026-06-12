@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Family Council — plan your week together</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='80' font-size='80'%3E🏠%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="landing">
+    <div class="blob" style="background:#ffd43b;width:280px;height:280px;top:-80px;left:-60px"></div>
+    <div class="blob" style="background:#4ecdc4;width:200px;height:200px;top:120px;right:-50px;animation-delay:1.2s"></div>
+    <div class="blob" style="background:#f783ac;width:150px;height:150px;bottom:60px;left:12%;animation-delay:2s"></div>
+    <div class="blob" style="background:#9b7ede;width:110px;height:110px;top:46%;right:20%;animation-delay:.6s"></div>
+
+    <nav class="landing-nav">
+      <a href="/" class="logo">🏠 Family Council</a>
+      <div id="nav-actions" style="display:flex;gap:10px">
+        <a class="btn ghost" href="/login">Log in</a>
+        <a class="btn" href="/signup">Sign up free</a>
+      </div>
+    </nav>
+
+    <section class="hero">
+      <h1>
+        Plan your week <span class="pop">together</span>,<br />
+        one family council at a <span class="pop2">time</span> 🎉
+      </h1>
+      <p>
+        Gather everyone once a week, pile up the chores and fun stuff, then drag each task onto the
+        right person and the right day. Done!
+      </p>
+      <div class="hero-cta">
+        <a class="btn" href="/signup">Start your family council 🚀</a>
+        <a class="btn yellow" href="/login">I already have one</a>
+      </div>
+    </section>
+
+    <section class="features">
+      <div class="feature">
+        <div class="icon">👨‍👩‍👧‍👦</div>
+        <h3>Your whole crew</h3>
+        <p>Add mom, dad, the kids — even grandma. Give everyone their own colorful cartoon avatar.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">🎨</div>
+        <h3>AI cartoon avatars</h3>
+        <p>Upload a photo or type a description and get a fun, family-friendly cartoon portrait.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">🗂️</div>
+        <h3>The task pile</h3>
+        <p>Toss in weekly chores and one-time missions. Weekly tasks hop back onto the pile every week.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">🖐️</div>
+        <h3>Drag, drop, done</h3>
+        <p>Drag a task onto a family member, then onto a weekday. Planning has never been this playful.</p>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    fetch('/api/me').then((r) => r.json()).then(({ user }) => {
+      if (user) {
+        document.getElementById('nav-actions').innerHTML =
+          '<a class="btn teal" href="/app">Open my planner</a>';
+      }
+    });
+  </script>
+</body>
+</html>

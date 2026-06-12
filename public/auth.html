@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Family Council</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='80' font-size='80'%3E🏠%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="landing auth-wrap">
+    <div class="blob" style="background:#ffd43b;width:260px;height:260px;top:-70px;left:-50px"></div>
+    <div class="blob" style="background:#4ecdc4;width:180px;height:180px;bottom:40px;right:-40px;animation-delay:1s"></div>
+    <form class="auth-card" id="auth-form">
+      <h1 id="title"></h1>
+      <p class="sub" id="subtitle"></p>
+      <div id="family-field" hidden>
+        <label class="field" for="familyName">Family name</label>
+        <input id="familyName" class="input" placeholder="The Awesome Family" />
+      </div>
+      <label class="field" for="email">Email</label>
+      <input id="email" class="input" type="email" placeholder="you@example.com" required />
+      <label class="field" for="password">Password</label>
+      <input id="password" class="input" type="password" required />
+      <div class="auth-error" id="error" hidden></div>
+      <button class="btn" type="submit" id="submit" style="width:100%;margin-top:20px"></button>
+      <p style="text-align:center;margin-top:16px;font-size:14px" id="switch"></p>
+    </form>
+  </div>
+
+  <script>
+    const isSignup = location.pathname === '/signup';
+    document.title = (isSignup ? 'Sign up' : 'Log in') + ' — Family Council';
+    document.getElementById('title').textContent = isSignup ? 'Start your family council 🎉' : 'Welcome back! 👋';
+    document.getElementById('subtitle').textContent = isSignup
+      ? 'One account for the whole family.'
+      : 'Your family planner is waiting.';
+    document.getElementById('submit').textContent = isSignup ? 'Create our planner' : 'Log in';
+    document.getElementById('switch').innerHTML = isSignup
+      ? 'Already have an account? <a href="/login">Log in</a>'
+      : 'New here? <a href="/signup">Sign up free</a>';
+    const pw = document.getElementById('password');
+    pw.placeholder = isSignup ? 'At least 6 characters' : 'Your password';
+    if (isSignup) {
+      document.getElementById('family-field').hidden = false;
+      document.getElementById('familyName').required = true;
+      pw.minLength = 6;
+    }
+
+    document.getElementById('auth-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('submit');
+      const errBox = document.getElementById('error');
+      btn.disabled = true;
+      errBox.hidden = true;
+      const body = {
+        email: document.getElementById('email').value,
+        password: pw.value,
+      };
+      if (isSignup) body.familyName = document.getElementById('familyName').value;
+      const res = await fetch('/api/auth/' + (isSignup ? 'signup' : 'login'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        errBox.textContent = data.error || 'Something went wrong. Please try again.';
+        errBox.hidden = false;
+        btn.disabled = false;
+        return;
+      }
+      location.href = '/app';
+    });
+  </script>
+</body>
+</html>

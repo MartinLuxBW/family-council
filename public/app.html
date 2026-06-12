@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Weekly planner — Family Council</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='80' font-size='80'%3E🏠%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <a class="logo" href="/">🏠 Family Council</a>
+    <div class="week-nav">
+      <button class="icon-btn" id="prev-week" title="Previous week">‹</button>
+      <span class="week-label" id="week-label">…</span>
+      <button class="icon-btn" id="next-week" title="Next week">›</button>
+      <button class="btn yellow small" id="today-btn">Today</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <strong class="display" id="family-name" style="font-size:17px"></strong>
+      <button class="btn ghost small" id="logout-btn">Log out</button>
+    </div>
+  </header>
+
+  <div class="members-row" id="members-row"></div>
+
+  <div class="board">
+    <aside class="pile" id="pile" data-drop="pile">
+      <h2>🗂️ Task pile</h2>
+      <form class="add-task" id="add-task-form">
+        <div class="row">
+          <input class="input" id="new-title" placeholder="New task… e.g. Water the plants" />
+        </div>
+        <div class="emoji-row" id="emoji-row"></div>
+        <div class="row">
+          <div class="type-toggle" style="flex:1" id="type-toggle">
+            <button type="button" data-type="weekly" class="on">🔁 Every week</button>
+            <button type="button" data-type="once">1️⃣ One time</button>
+          </div>
+          <button class="btn teal small" type="submit">Add</button>
+        </div>
+      </form>
+      <div class="pile-section-title">📥 To assign — drag onto a person</div>
+      <div id="pile-unassigned"></div>
+      <div id="pile-ready-wrap" hidden>
+        <div class="pile-section-title">📅 Assigned — drag onto a day</div>
+        <div id="pile-ready"></div>
+      </div>
+    </aside>
+
+    <main class="week-grid" id="week-grid"></main>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
