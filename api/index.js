@@ -22,6 +22,29 @@ const MIME = {
 
 const ALLOWED_UPLOADS = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 
+// RunOps stats endpoint secret. MUST be provided via the RUNOPS_KEY env var
+// (Vercel dashboard in prod, .env.local locally) — never hardcoded, so it stays out of the repo.
+// If unset, the endpoint is disabled (fails closed).
+const RUNOPS_KEY = process.env.RUNOPS_KEY || '';
+
+function timingSafeEqual(a, b) {
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  return bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB);
+}
+
+// Increment today's page-view bucket. Wrapped so a stats failure never breaks page serving.
+function recordPageView() {
+  try {
+    db.prepare(
+      `INSERT INTO traffic_daily (day, hits) VALUES (date('now'), 1)
+       ON CONFLICT(day) DO UPDATE SET hits = hits + 1`
+    ).run();
+  } catch (err) {
+    console.error('traffic record failed', err);
+  }
+}
+
 function json(res, status, obj, extraHeaders = {}) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...extraHeaders });
   res.end(JSON.stringify(obj));
@@ -91,6 +114,25 @@ const api = {
 
   'GET /api/me': async (req, res, user) => {
     json(res, 200, { user: user ? { email: user.email, familyName: user.family_name } : null });
+  },
+
+  // Stats for the RunOps monitoring tool. Auth via x-runops-key header (constant-time compared).
+  'GET /api/public/runops-stats': async (req, res) => {
+    if (!RUNOPS_KEY) {
+      return json(res, 503, { error: 'Stats endpoint not configured. Set the RUNOPS_KEY environment variable.' });
+    }
+    if (!timingSafeEqual(req.headers['x-runops-key'] ?? '', RUNOPS_KEY)) {
+      return json(res, 401, { error: 'Unauthorized' });
+    }
+    const users_total = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
+    const sumSince = (modifier) =>
+      db.prepare(`SELECT COALESCE(SUM(hits), 0) AS c FROM traffic_daily WHERE day >= date('now', ?)`).get(modifier).c;
+    const traffic = {
+      daily: db.prepare(`SELECT COALESCE(SUM(hits), 0) AS c FROM traffic_daily WHERE day = date('now')`).get().c,
+      weekly: sumSince('-6 days'),
+      monthly: sumSince('-29 days'),
+    };
+    json(res, 200, { users_total, traffic });
   },
 
   'GET /api/week': async (req, res, user, url) => {
@@ -253,6 +295,7 @@ export default async function handler(req, res) {
         res.writeHead(302, { Location: '/login' });
         return res.end();
       }
+      recordPageView();
       return sendFile(res, path.join(PUBLIC, PAGES[url.pathname]));
     }
 
