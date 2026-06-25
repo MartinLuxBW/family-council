@@ -41,12 +41,30 @@ $env:OPENAI_API_KEY = "sk-..."
 node server.js
 ```
 
+## Persistent database (Turso)
+
+The data layer ([lib/db.js](lib/db.js)) auto-selects a backend:
+
+| Environment | Backend | Notes |
+|---|---|---|
+| `TURSO_DATABASE_URL` set | **Turso** (`@libsql/client`) | Durable; the production path on Vercel |
+| Node 24 local dev | `node:sqlite` | Built-in, file under `data/` |
+| Fallback | `better-sqlite3` | If `node:sqlite` is unavailable |
+
+Because Turso *is* SQLite, the schema and every query are identical across all three.
+
+To use Turso in production:
+
+1. Create a free database at <https://turso.tech>.
+2. Grab the URL and a token: `turso db show <name> --url` and `turso db tokens create <name>`.
+3. Set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in your Vercel project's environment variables.
+
 ## Tech
 
-Zero npm dependencies (the corporate network blocks registry.npmjs.org, so this is by design):
-
-- **Server** — Node.js `node:http` + built-in `node:sqlite`, signed-cookie sessions (`node:crypto`
-  scrypt + HMAC), raw-body image uploads. All routes in [server.js](server.js).
+- **Server** — `node:http` handler ([api/index.js](api/index.js)) run by [server.js](server.js)
+  locally and as a Vercel serverless function in prod. Signed-cookie sessions (`node:crypto` scrypt
+  + HMAC), raw-body image uploads.
+- **Database** — async `get`/`all`/`run` over Turso/libSQL or local SQLite (see above).
 - **Frontend** — vanilla JS SPA ([public/app.js](public/app.js)) with native HTML5 drag & drop.
 - **Theme** — hand-rolled warm/fun CSS (Baloo 2 + Nunito, cream/coral/teal/sunshine palette) in
   [public/styles.css](public/styles.css).

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import db, { UPLOADS_DIR } from '../lib/db.js';
+import { get, all, run, UPLOADS_DIR } from '../lib/db.js';
 import { hashPassword, verifyPassword, sessionCookie, clearCookie, userFromRequest } from '../lib/auth.js';
 import { generateAvatar } from '../lib/imagegen.js';
 
@@ -33,13 +33,14 @@ function timingSafeEqual(a, b) {
   return bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB);
 }
 
-// Increment today's page-view bucket. Wrapped so a stats failure never breaks page serving.
-function recordPageView() {
+// Increment today's page-view bucket. Awaited before serving so the write flushes
+// before a serverless function freezes. Wrapped so a stats failure never breaks page serving.
+async function recordPageView() {
   try {
-    db.prepare(
+    await run(
       `INSERT INTO traffic_daily (day, hits) VALUES (date('now'), 1)
        ON CONFLICT(day) DO UPDATE SET hits = hits + 1`
-    ).run();
+    );
   } catch (err) {
     console.error('traffic record failed', err);
   }
@@ -91,17 +92,17 @@ const api = {
       return json(res, 400, { error: 'Please fill in everything — password needs at least 6 characters.' });
     }
     const mail = email.trim().toLowerCase();
-    if (db.prepare('SELECT id FROM users WHERE email = ?').get(mail)) {
+    if (await get('SELECT id FROM users WHERE email = ?', [mail])) {
       return json(res, 409, { error: 'That email is already signed up. Try logging in!' });
     }
-    const r = db.prepare('INSERT INTO users (email, password_hash, family_name) VALUES (?, ?, ?)')
-      .run(mail, hashPassword(password), familyName.trim());
+    const r = await run('INSERT INTO users (email, password_hash, family_name) VALUES (?, ?, ?)',
+      [mail, hashPassword(password), familyName.trim()]);
     json(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie(r.lastInsertRowid) });
   },
 
   'POST /api/auth/login': async (req, res) => {
     const { email, password } = await readJson(req);
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email?.trim().toLowerCase() ?? '');
+    const user = await get('SELECT * FROM users WHERE email = ?', [email?.trim().toLowerCase() ?? '']);
     if (!user || !verifyPassword(password ?? '', user.password_hash)) {
       return json(res, 401, { error: "Email or password doesn't match." });
     }
@@ -124,13 +125,13 @@ const api = {
     if (!timingSafeEqual(req.headers['x-runops-key'] ?? '', RUNOPS_KEY)) {
       return json(res, 401, { error: 'Unauthorized' });
     }
-    const users_total = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
-    const sumSince = (modifier) =>
-      db.prepare(`SELECT COALESCE(SUM(hits), 0) AS c FROM traffic_daily WHERE day >= date('now', ?)`).get(modifier).c;
+    const users_total = (await get('SELECT COUNT(*) AS c FROM users')).c;
+    const sumSince = async (modifier) =>
+      (await get(`SELECT COALESCE(SUM(hits), 0) AS c FROM traffic_daily WHERE day >= date('now', ?)`, [modifier])).c;
     const traffic = {
-      daily: db.prepare(`SELECT COALESCE(SUM(hits), 0) AS c FROM traffic_daily WHERE day = date('now')`).get().c,
-      weekly: sumSince('-6 days'),
-      monthly: sumSince('-29 days'),
+      daily: (await get(`SELECT COALESCE(SUM(hits), 0) AS c FROM traffic_daily WHERE day = date('now')`)).c,
+      weekly: await sumSince('-6 days'),
+      monthly: await sumSince('-29 days'),
     };
     json(res, 200, { users_total, traffic });
   },
@@ -139,11 +140,12 @@ const api = {
     if (!user) return json(res, 401, { error: 'Not logged in' });
     const weekStart = url.searchParams.get('start');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart ?? '')) return json(res, 400, { error: 'Invalid week' });
-    const weekly = db.prepare("SELECT id FROM tasks WHERE user_id = ? AND type = 'weekly' AND active = 1").all(user.id);
-    const ins = db.prepare('INSERT OR IGNORE INTO instances (user_id, task_id, week_start) VALUES (?, ?, ?)');
-    for (const t of weekly) ins.run(user.id, t.id, weekStart);
-    const members = db.prepare('SELECT * FROM members WHERE user_id = ? ORDER BY id').all(user.id);
-    const instances = db.prepare(`${INSTANCE_SELECT} WHERE i.user_id = ? AND i.week_start = ? ORDER BY i.id`).all(user.id, weekStart);
+    const weekly = await all("SELECT id FROM tasks WHERE user_id = ? AND type = 'weekly' AND active = 1", [user.id]);
+    for (const t of weekly) {
+      await run('INSERT OR IGNORE INTO instances (user_id, task_id, week_start) VALUES (?, ?, ?)', [user.id, t.id, weekStart]);
+    }
+    const members = await all('SELECT * FROM members WHERE user_id = ? ORDER BY id', [user.id]);
+    const instances = await all(`${INSTANCE_SELECT} WHERE i.user_id = ? AND i.week_start = ? ORDER BY i.id`, [user.id, weekStart]);
     json(res, 200, { members, instances, weekStart, familyName: user.family_name });
   },
 
@@ -151,33 +153,33 @@ const api = {
     if (!user) return json(res, 401, { error: 'Not logged in' });
     const { name, role, color } = await readJson(req);
     if (!name?.trim()) return json(res, 400, { error: 'A name is required.' });
-    const r = db.prepare('INSERT INTO members (user_id, name, role, color) VALUES (?, ?, ?, ?)')
-      .run(user.id, name.trim(), role?.trim() || 'Member', color || '#FF6B6B');
-    json(res, 200, { member: db.prepare('SELECT * FROM members WHERE id = ?').get(r.lastInsertRowid) });
+    const r = await run('INSERT INTO members (user_id, name, role, color) VALUES (?, ?, ?, ?)',
+      [user.id, name.trim(), role?.trim() || 'Member', color || '#FF6B6B']);
+    json(res, 200, { member: await get('SELECT * FROM members WHERE id = ?', [r.lastInsertRowid]) });
   },
 
   'PATCH /api/members/:id': async (req, res, user, url, m) => {
     if (!user) return json(res, 401, { error: 'Not logged in' });
-    const member = db.prepare('SELECT * FROM members WHERE id = ? AND user_id = ?').get(m.id, user.id);
+    const member = await get('SELECT * FROM members WHERE id = ? AND user_id = ?', [m.id, user.id]);
     if (!member) return json(res, 404, { error: 'Not found' });
     const { name, role, color } = await readJson(req);
-    db.prepare('UPDATE members SET name = ?, role = ?, color = ? WHERE id = ?').run(
-      name?.trim() || member.name, role?.trim() || member.role, color || member.color, member.id);
-    json(res, 200, { member: db.prepare('SELECT * FROM members WHERE id = ?').get(member.id) });
+    await run('UPDATE members SET name = ?, role = ?, color = ? WHERE id = ?',
+      [name?.trim() || member.name, role?.trim() || member.role, color || member.color, member.id]);
+    json(res, 200, { member: await get('SELECT * FROM members WHERE id = ?', [member.id]) });
   },
 
   'DELETE /api/members/:id': async (req, res, user, url, m) => {
     if (!user) return json(res, 401, { error: 'Not logged in' });
-    const member = db.prepare('SELECT * FROM members WHERE id = ? AND user_id = ?').get(m.id, user.id);
+    const member = await get('SELECT * FROM members WHERE id = ? AND user_id = ?', [m.id, user.id]);
     if (!member) return json(res, 404, { error: 'Not found' });
-    db.prepare('UPDATE instances SET member_id = NULL, day = NULL WHERE member_id = ?').run(member.id);
-    db.prepare('DELETE FROM members WHERE id = ?').run(member.id);
+    await run('UPDATE instances SET member_id = NULL, day = NULL WHERE member_id = ?', [member.id]);
+    await run('DELETE FROM members WHERE id = ?', [member.id]);
     json(res, 200, { ok: true });
   },
 
   'POST /api/members/:id/image': async (req, res, user, url, m) => {
     if (!user) return json(res, 401, { error: 'Not logged in' });
-    const member = db.prepare('SELECT * FROM members WHERE id = ? AND user_id = ?').get(m.id, user.id);
+    const member = await get('SELECT * FROM members WHERE id = ? AND user_id = ?', [m.id, user.id]);
     if (!member) return json(res, 404, { error: 'Not found' });
     const ext = ALLOWED_UPLOADS[req.headers['content-type']?.split(';')[0].trim()];
     if (!ext) return json(res, 400, { error: 'Please upload a PNG, JPG, or WebP image.' });
@@ -186,20 +188,20 @@ const api = {
     if (!body.length) return json(res, 400, { error: 'No file uploaded.' });
     const name = `photo-${crypto.randomBytes(8).toString('hex')}.${ext}`;
     fs.writeFileSync(path.join(UPLOADS_DIR, name), body);
-    db.prepare('UPDATE members SET photo = ?, image = ? WHERE id = ?').run(name, name, member.id);
-    json(res, 200, { member: db.prepare('SELECT * FROM members WHERE id = ?').get(member.id) });
+    await run('UPDATE members SET photo = ?, image = ? WHERE id = ?', [name, name, member.id]);
+    json(res, 200, { member: await get('SELECT * FROM members WHERE id = ?', [member.id]) });
   },
 
   'POST /api/members/:id/generate': async (req, res, user, url, m) => {
     if (!user) return json(res, 401, { error: 'Not logged in' });
-    const member = db.prepare('SELECT * FROM members WHERE id = ? AND user_id = ?').get(m.id, user.id);
+    const member = await get('SELECT * FROM members WHERE id = ? AND user_id = ?', [m.id, user.id]);
     if (!member) return json(res, 404, { error: 'Not found' });
     const { mode, description } = await readJson(req);
     if (mode === 'photo' && !member.photo) return json(res, 400, { error: 'Upload a photo first!' });
     try {
       const { filename, source } = await generateAvatar({ member, mode, description });
-      db.prepare('UPDATE members SET image = ? WHERE id = ?').run(filename, member.id);
-      json(res, 200, { member: db.prepare('SELECT * FROM members WHERE id = ?').get(member.id), source });
+      await run('UPDATE members SET image = ? WHERE id = ?', [filename, member.id]);
+      json(res, 200, { member: await get('SELECT * FROM members WHERE id = ?', [member.id]), source });
     } catch (err) {
       console.error(err);
       json(res, 502, { error: 'Image generation failed. Please try again.' });
@@ -211,17 +213,17 @@ const api = {
     const { title, emoji, type, weekStart } = await readJson(req);
     if (!title?.trim()) return json(res, 400, { error: 'The task needs a name.' });
     if (!['weekly', 'once'].includes(type)) return json(res, 400, { error: 'Invalid task type.' });
-    const r = db.prepare('INSERT INTO tasks (user_id, title, emoji, type) VALUES (?, ?, ?, ?)')
-      .run(user.id, title.trim(), emoji || '⭐', type);
+    const r = await run('INSERT INTO tasks (user_id, title, emoji, type) VALUES (?, ?, ?, ?)',
+      [user.id, title.trim(), emoji || '⭐', type]);
     if (/^\d{4}-\d{2}-\d{2}$/.test(weekStart ?? '')) {
-      db.prepare('INSERT INTO instances (user_id, task_id, week_start) VALUES (?, ?, ?)').run(user.id, r.lastInsertRowid, weekStart);
+      await run('INSERT INTO instances (user_id, task_id, week_start) VALUES (?, ?, ?)', [user.id, r.lastInsertRowid, weekStart]);
     }
     json(res, 200, { ok: true });
   },
 
   'PATCH /api/instances/:id': async (req, res, user, url, m) => {
     if (!user) return json(res, 401, { error: 'Not logged in' });
-    const inst = db.prepare('SELECT * FROM instances WHERE id = ? AND user_id = ?').get(m.id, user.id);
+    const inst = await get('SELECT * FROM instances WHERE id = ? AND user_id = ?', [m.id, user.id]);
     if (!inst) return json(res, 404, { error: 'Not found' });
     const body = await readJson(req);
     let { member_id, is_family, day, completed } = { ...inst, ...body };
@@ -229,27 +231,27 @@ const api = {
     if ('is_family' in body && body.is_family) member_id = null;
     if (day != null && member_id == null && !is_family) return json(res, 400, { error: 'Assign this task to someone first!' });
     if (day != null && (day < 0 || day > 6)) return json(res, 400, { error: 'Invalid day' });
-    db.prepare('UPDATE instances SET member_id = ?, is_family = ?, day = ?, completed = ? WHERE id = ?')
-      .run(member_id, is_family ? 1 : 0, day, completed ? 1 : 0, inst.id);
-    json(res, 200, { instance: db.prepare(`${INSTANCE_SELECT} WHERE i.id = ?`).get(inst.id) });
+    await run('UPDATE instances SET member_id = ?, is_family = ?, day = ?, completed = ? WHERE id = ?',
+      [member_id ?? null, is_family ? 1 : 0, day ?? null, completed ? 1 : 0, inst.id]);
+    json(res, 200, { instance: await get(`${INSTANCE_SELECT} WHERE i.id = ?`, [inst.id]) });
   },
 
   'DELETE /api/instances/:id': async (req, res, user, url, m) => {
     if (!user) return json(res, 401, { error: 'Not logged in' });
-    const inst = db.prepare('SELECT * FROM instances WHERE id = ? AND user_id = ?').get(m.id, user.id);
+    const inst = await get('SELECT * FROM instances WHERE id = ? AND user_id = ?', [m.id, user.id]);
     if (!inst) return json(res, 404, { error: 'Not found' });
-    db.prepare('DELETE FROM instances WHERE id = ?').run(inst.id);
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(inst.task_id);
-    if (task?.type === 'once') db.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
+    await run('DELETE FROM instances WHERE id = ?', [inst.id]);
+    const task = await get('SELECT * FROM tasks WHERE id = ?', [inst.task_id]);
+    if (task?.type === 'once') await run('DELETE FROM tasks WHERE id = ?', [task.id]);
     json(res, 200, { ok: true });
   },
 
   'DELETE /api/tasks/:id': async (req, res, user, url, m) => {
     if (!user) return json(res, 401, { error: 'Not logged in' });
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND user_id = ?').get(m.id, user.id);
+    const task = await get('SELECT * FROM tasks WHERE id = ? AND user_id = ?', [m.id, user.id]);
     if (!task) return json(res, 404, { error: 'Not found' });
-    db.prepare('DELETE FROM instances WHERE task_id = ?').run(task.id);
-    db.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
+    await run('DELETE FROM instances WHERE task_id = ?', [task.id]);
+    await run('DELETE FROM tasks WHERE id = ?', [task.id]);
     json(res, 200, { ok: true });
   },
 
@@ -285,17 +287,17 @@ export default async function handler(req, res) {
       if (req.method !== method) continue;
       const match = url.pathname.match(re);
       if (!match) continue;
-      const user = userFromRequest(req);
+      const user = await userFromRequest(req);
       await handler(req, res, user, url, match.groups ?? {});
       return;
     }
 
     if (req.method === 'GET' && PAGES[url.pathname]) {
-      if (url.pathname === '/app' && !userFromRequest(req)) {
+      if (url.pathname === '/app' && !(await userFromRequest(req))) {
         res.writeHead(302, { Location: '/login' });
         return res.end();
       }
-      recordPageView();
+      await recordPageView();
       return sendFile(res, path.join(PUBLIC, PAGES[url.pathname]));
     }
 
